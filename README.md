@@ -7,6 +7,8 @@ A high-performance, custom-rendered FMX component for Delphi that provides a flu
 
 Prototype v0.1     
      
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/LaMitaOne/Skia-AliveGrid)     
+       
 [<img width="576" height="856" alt="Unbenannt" src="https://github.com/user-attachments/assets/49ac92be-dc4b-4a6b-932a-bfa3d87bcbf3" />    
 ](https://github.com/user-attachments/assets/8d456986-18eb-4f93-b53a-1db8c1c9ed2b)  
     
