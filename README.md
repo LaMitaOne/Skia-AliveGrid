@@ -34,4 +34,5 @@ Prototype v0.1
 No manual code installation is required.     
 Zipped exe and sample project included.     
 
-Cool huh? Just an idea i got while playing around at magma visualizer effect :D still lot do sure, no scrolling so far, but..."Delphi looks so old" is history  
+Cool huh? Just an idea i got while playing around at magma visualizer effect :D still lot do sure, no scrolling so far, but..."Delphi looks so old" is history    
+2 Items my Zenbook with M3 dualcore even does smooth still but more...he not likes 
