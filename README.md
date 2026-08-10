@@ -1,10 +1,15 @@
+
+
+
+
 # Skia-AliveGrid
 A high-performance, custom-rendered FMX component for Delphi that provides a fluid, physics-based list interface. Built entirely on the Skia4Delphi graphics pipeline, it breaks away from traditional UI constraints to deliver a smooth, modern, and highly interactive user experience.     
 
 Prototype v0.1     
      
-<img width="576" height="856" alt="Unbenannt" src="https://github.com/user-attachments/assets/49ac92be-dc4b-4a6b-932a-bfa3d87bcbf3" />    
-     
+[<img width="576" height="856" alt="Unbenannt" src="https://github.com/user-attachments/assets/49ac92be-dc4b-4a6b-932a-bfa3d87bcbf3" />    
+](https://github.com/user-attachments/assets/8d456986-18eb-4f93-b53a-1db8c1c9ed2b)  
+    
 ✨ Key Features   
      -Real-Time Fluid Physics: The list items are not simple rectangles. They are constructed from a grid of interconnected particles using Verlet integration and constraint solving, creating a liquid, jelly-like wobble effect.     
      -Magnetic Control Dots: Each item features a magnetic indicator dot that snaps to the cursor when approached, providing tactile and intuitive feedback.      
