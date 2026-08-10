@@ -9,7 +9,7 @@ Prototype v0.1
      
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/LaMitaOne/Skia-AliveGrid)     
        
-<img width="360" height="202" alt="ayj9ru" src="https://github.com/user-attachments/assets/4087e359-578e-4cdc-a394-e0fc52076a30" />
+https://github.com/user-attachments/assets/bf8168ae-59a9-4bfd-a3a2-6e775962ea7e
      
 https://youtu.be/_VZG5IgrEFw
     
