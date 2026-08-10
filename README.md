@@ -10,7 +10,7 @@ Prototype v0.1
      -Magnetic Control Dots: Each item features a magnetic indicator dot that snaps to the cursor when approached, providing tactile and intuitive feedback.      
      -Interactive Repulsion: Move your mouse over the grid, and the fluid items dynamically repel away from the cursor, settling smoothly back into place when the cursor leaves.     
      -Smooth Drag & Drop: Grab any item to drag it. The surrounding items fluidly swap positions to make room, and the dragged item snaps softly into its new slot upon release.     
-     -Dynamic Intro & Outro Animations: New items organically "fly" up from the bottom of the screen into their correct positions. Removed items gracefully fall away.      
+     -Dynamic Intro & Outro Animations: New items organically flows up from the bottom of the screen into their correct positions and unfolds there to its final form. Removed items gracefully fall away.      
      -Optimized Rendering Pipeline:     
          Runs entirely on a separate background thread to keep the main UI thread at 0% load.     
          Uses a centralized ISkSurface caching system. Only dirty/changed regions are redrawn.     
