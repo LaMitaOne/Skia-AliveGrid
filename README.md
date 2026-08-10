@@ -11,6 +11,7 @@ Prototype v0.1
        
 [<img width="576" height="856" alt="Unbenannt" src="https://github.com/user-attachments/assets/49ac92be-dc4b-4a6b-932a-bfa3d87bcbf3" />    
 ](https://github.com/user-attachments/assets/8d456986-18eb-4f93-b53a-1db8c1c9ed2b)  
+https://youtu.be/_VZG5IgrEFw
     
 ✨ Key Features   
      -Real-Time Fluid Physics: The list items are not simple rectangles. They are constructed from a grid of interconnected particles using Verlet integration and constraint solving, creating a liquid, jelly-like wobble effect.     
