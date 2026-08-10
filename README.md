@@ -34,3 +34,4 @@ Prototype v0.1
 No manual code installation is required.     
 Zipped exe and sample project included.     
 
+cool huh? Just an idea i got while playing around at magma visualizer effect :D still lot do sure, no scrolling so far, but..."Delphi looks so old" is history  
