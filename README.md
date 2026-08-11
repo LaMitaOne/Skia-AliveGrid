@@ -5,7 +5,7 @@
 # Skia-AliveGrid
 A high-performance, custom-rendered FMX component for Delphi that provides a fluid, physics-based list interface. Built entirely on the Skia4Delphi graphics pipeline, it breaks away from traditional UI constraints to deliver a smooth, modern, and highly interactive user experience.     
 
-Prototype v0.1     
+Prototype v0.2     
      
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/LaMitaOne/Skia-AliveGrid)     
        
@@ -35,7 +35,18 @@ https://youtu.be/_VZG5IgrEFw
 No manual code installation is required.     
 Zipped exe and sample project included.     
 
-Just an idea i got while playing around at magma visualizer effect.       
-Still lot to do sure, no scrolling so far...    
-     
-2 Items my Zenbook with M3 dualcore even does smooth still but more...he not likes    
+Latest changes:   
+    v0.2:    
+      - Scrolling Support: Added full vertical scrolling logic,    
+        including mouse wheel interaction.    
+      - Custom Scrollbar: Implemented a dynamic,    
+        smoothly fading scrollbar button for visual scroll indication    
+        and direct dragging.    
+      - Virtualized Slide Pool: Added a dynamic pooling system that    
+        recycles slides based on the current scroll offset to handle    
+        large item lists efficiently.    
+      - Smooth Scroll Physics: Integrated fast-snap logic for slides    
+        during fast scrolling, pausing heavy physics calculations to    
+        maintain high frame rates.    
+    
+ 
