@@ -17,6 +17,21 @@
 
   Author: Lara Miriam Tamy Reschke
   License: MIT
+
+  Latest changes:
+    v0.2:
+      - Scrolling Support: Added full vertical scrolling logic,
+        including mouse wheel interaction.
+      - Custom Scrollbar: Implemented a dynamic,
+        smoothly fading scrollbar button for visual scroll indication
+        and direct dragging.
+      - Virtualized Slide Pool: Added a dynamic pooling system that
+        recycles slides based on the current scroll offset to handle
+        large item lists efficiently.
+      - Smooth Scroll Physics: Integrated fast-snap logic for slides
+        during fast scrolling, pausing heavy physics calculations to
+        maintain high frame rates.
+
 *******************************************************************************}
 
 unit uAliveGrid;
@@ -28,9 +43,6 @@ uses
   System.UITypes, FMX.Types, FMX.Controls, FMX.Graphics, FMX.Skia, System.Skia;
 
 type
-  /// <summary>
-  /// Holds the static data for a grid item, including text, paths, and image bitmap.
-  /// </summary>
   TGridItemData = record
     Caption: string;
     Hint: string;
@@ -40,10 +52,6 @@ type
     ImageBitmap: ISkImage;
   end;
 
-  /// <summary>
-  /// Represents a single particle node within the liquid slide grid.
-  /// Used in the physics calculation (Verlet integration).
-  /// </summary>
   TGridParticle = record
     X, Y: Single;
     OldX, OldY: Single;
@@ -52,9 +60,6 @@ type
     ActivationTime: Cardinal;
   end;
 
-  /// <summary>
-  /// Represents the interactive magnetic dot at the top-right of each slide.
-  /// </summary>
   TControlDot = record
     X, Y: Single;
     OldX, OldY: Single;
@@ -64,10 +69,6 @@ type
     ActualAlpha, TargetAlpha: Single;
   end;
 
-  /// <summary>
-  /// The main visual slide object. Contains its own physics state, content cache,
-  /// and rendering surface to allow independent updates.
-  /// </summary>
   TGridSlide = record
     TargetX, TargetY: Single;
     CurrentX, CurrentY: Single;
@@ -82,7 +83,6 @@ type
     IsDragging: Boolean;
     MaxActivationTime: Cardinal;
 
-    // Caching Properties
     Cache: ISkImage;
     SlideSurface: ISkSurface;
     SlideSurfaceInfo: TSkImageInfo;
@@ -93,16 +93,14 @@ type
     TopRightIdx: Integer;
     ActualSlideW, ActualSlideH: Single;
     ItemID: Integer;
+
+    LogicalItemIdx: Integer;
   end;
 
   TSlideMouseEvent = procedure(Sender: TObject; SlideIdx: Integer; Button: TMouseButton; Shift: TShiftState; X, Y: Single) of object;
 
   TSlideNotifyEvent = procedure(Sender: TObject; SlideIdx: Integer) of object;
 
-  /// <summary>
-  /// A liquid, particle-based grid container component.
-  /// Renders dynamically using Skia in a background thread.
-  /// </summary>
   TAliveGrid = class(TSkCustomControl)
   private
     FThread: TThread;
@@ -120,7 +118,6 @@ type
     FAnyDirty: Boolean;
     FIsResizing: Boolean;
 
-    // Drag & Drop State
     FDraggedSlideIdx: Integer;
     FDragOffsetX, FDragOffsetY: Single;
     FIsDragging: Boolean;
@@ -129,29 +126,32 @@ type
     FMouseDownSlideIdx: Integer;
     FMouseIsDownOnDot: Boolean;
     FNextItemID: Integer;
+    FIsDraggingScrollBar: Boolean;
+    FLastScrollTime: Cardinal;
 
-    // Target and Actual Colors (for smooth lerping transitions)
     FTargetItemColor, FActualItemColor: TAlphaColor;
     FTargetShadowColor, FActualShadowColor: TAlphaColor;
     FTargetDotColor, FActualDotColor: TAlphaColor;
 
-    // Data Arrays
     FAllItems: array of TGridItemData;
     FAllItemIDs: array of Integer;
     FVisibleSlides: array of TGridSlide;
 
-    // Font & Text Cache
+    FScrollOffset: Single;
+    FMaxScroll: Single;
+    FScrollBarDot: TControlDot;
+
     FFontName: string;
     FFontSize: Single;
     FFontIsBold: Boolean;
     FFontIsItalic: Boolean;
     FCaptionColor, FPathColor: TAlphaColor;
+
     FTextCache: ISkImage;
     FTextCacheSurface: ISkSurface;
     FTextCacheInfo: TSkImageInfo;
     FNeedsTextCacheUpdate: Boolean;
 
-    // Events
     FOnSlideMouseDown: TSlideMouseEvent;
     FOnDotMouseDown: TSlideMouseEvent;
     FOnSlideClick: TSlideNotifyEvent;
@@ -159,7 +159,6 @@ type
     FOnDotClick: TSlideNotifyEvent;
     FOnDotDblClick: TSlideNotifyEvent;
 
-    { Setters for properties }
     procedure SetActive(const Value: Boolean);
     procedure SetIntensity(const Value: Single);
     procedure SetItemColor(const Value: TAlphaColor);
@@ -172,7 +171,6 @@ type
     procedure SetCaptionColor(const Value: TAlphaColor);
     procedure SetPathColor(const Value: TAlphaColor);
 
-    { Thread and Rendering Management }
     procedure SafeInvalidate;
     procedure DoRedraw;
     procedure StartThread;
@@ -180,20 +178,22 @@ type
     procedure DrawBackgroundCache;
     procedure UpdateTextCache;
 
-    { Slide Management & Physics }
     procedure UpdateVisibleSlides;
-    procedure SpawnVisibleSlide(ActiveIdx: Integer);
+    procedure RecycleSlide(var ASlide: TGridSlide; NewLogicalIdx: Integer; Animate: Boolean);
+    procedure PlaySpawnAnimation(var ASlide: TGridSlide);
+    procedure UpdateSlideMapping;
     procedure UpdateTargets;
-    procedure SwapSlides(Idx1, Idx2: Integer);
+    procedure SwapDataItems(Idx1, Idx2: Integer);
     procedure GenerateContentCache(var ASlide: TGridSlide; const AData: TGridItemData);
     procedure ProcessSlidePhysics(var ASlide: TGridSlide; const NowTime: Cardinal; const LW, LH: Single);
     procedure ProcessSlideConstraints(var ASlide: TGridSlide; const NowTime: Cardinal; const LW, LH: Single);
     procedure ProcessSlideCaching(var ASlide: TGridSlide; const NowTime: Cardinal; const LW, LH: Single; const ABlurPaint, ABlackPaint, AContentPaint, AControlDotPaint, AHighlightPaint: ISkPaint);
     procedure ExecuteRenderLoop;
 
-    { Utilities }
     function GetDotRect(Idx: Integer): TRectF;
     function FindItemIdxByID(ID: Integer): Integer;
+    function IsLogicalIdxMapped(LogicalIdx: Integer): Boolean;
+    function IsLogicalIdxDying(LogicalIdx: Integer): Boolean;
   protected
     procedure Resize; override;
     procedure Draw(const ACanvas: ISkCanvas; const ADest: TRectF; const AOpacity: Single); override;
@@ -202,18 +202,12 @@ type
     procedure MouseUp(Button: TMouseButton; ButtonState: TShiftState; X, Y: Single); override;
     procedure DoMouseLeave; override;
     procedure DblClick; override;
+    procedure MouseWheel(Shift: TShiftState; WheelDelta: Integer; var Handled: Boolean); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
 
-    /// <summary>
-    /// Adds a new item to the grid. Generates a thumbnail if an image path is provided.
-    /// </summary>
     procedure AddItem(const ACaption: string = ''; const AHint: string = ''; const AFilePath: string = ''; const AImagePath: string = '');
-
-    /// <summary>
-    /// Marks an item for removal. The slide will play a death animation before being destroyed.
-    /// </summary>
     procedure RemoveItem(Index: Integer);
 
     property Active: Boolean read FActive write SetActive;
@@ -248,11 +242,9 @@ const
   BaseSlideH = 100;
   SlideGap = 80;
   BorderGap = 40;
+  ScrollBarWidth = 6;
+  ScrollBarHeight = 40;
 
-/// <summary>
-/// Helper function to interpolate linearly between two TAlphaColors.
-/// Used for smooth color transitions (Actual to Target).
-/// </summary>
 function LerpColor(C1, C2: TAlphaColor; t: Single): TAlphaColor;
 var
   A1, R1, G1, B1, A2, R2, G2, B2: Byte;
@@ -265,7 +257,7 @@ begin
   R2 := (C2 shr 16) and $FF;
   G2 := (C2 shr 8) and $FF;
   B2 := C2 and $FF;
-  Result := (Round(A1 + (A2 - A1) * t) shl 24) or (Round(R1 + (R2 - R1) * t) shl 16) or (Round(G1 + (G2 - G1) * t) shl 8) or (Round(B1 + (B2 - B1) * t));
+  Result := (Round(A1 + (A2 - A1) * t) shl 24) or (Round(R1 + (R2 - R1) * t) shl 16) or (Round(G1 + (G2 - G1) * t) shl 8) or Round(B1 + (B2 - B1) * t);
 end;
 
 { TAliveGrid }
@@ -273,12 +265,9 @@ end;
 constructor TAliveGrid.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
-
-  // Initialize thread synchronization
   FLock := TCriticalSection.Create;
   HitTest := True;
 
-  // Default states
   FActive := True;
   FIntensity := 0.2;
   FIsMouseOver := False;
@@ -286,15 +275,20 @@ begin
   FCurrentHeight := 100;
   FMousePos := TPointF.Create(0, 0);
 
-  // Drag state initialization
   FDraggedSlideIdx := -1;
   FIsDragging := False;
   FMouseIsDown := False;
   FIsResizing := False;
   FMouseDownSlideIdx := -1;
   FNextItemID := 1;
+  FIsDraggingScrollBar := False;
+  FLastScrollTime := 0;
 
-  // Default Colors
+  FScrollOffset := 0;
+  FMaxScroll := 0;
+  FScrollBarDot.TargetAlpha := 0;
+  FScrollBarDot.ActualAlpha := 0;
+
   FTargetItemColor := $FF080A12;
   FActualItemColor := FTargetItemColor;
   FTargetShadowColor := $FF000000;
@@ -302,39 +296,51 @@ begin
   FTargetDotColor := $FF00838F;
   FActualDotColor := FTargetDotColor;
 
-  // Default Font
   FFontName := 'Segoe UI';
   FFontSize := 18;
   FFontIsBold := False;
   FFontIsItalic := False;
-
   FCaptionColor := TAlphaColors.White;
   FPathColor := $FF888888;
 
   FNeedsTextCacheUpdate := True;
-
-  // Start the background rendering thread
   StartThread;
 end;
 
 destructor TAliveGrid.Destroy;
 begin
-  // Ensure thread is safely terminated before freeing the lock
   StopThread;
   FreeAndNil(FLock);
   inherited;
 end;
 
-/// <summary>
-/// Finds the array index of an item by its unique persistent ID.
-/// Crucial for maintaining mapping when items are inserted or removed.
-/// </summary>
 function TAliveGrid.FindItemIdxByID(ID: Integer): Integer;
 begin
   for Result := 0 to High(FAllItemIDs) do
     if FAllItemIDs[Result] = ID then
       Exit;
   Result := -1;
+end;
+
+function TAliveGrid.IsLogicalIdxMapped(LogicalIdx: Integer): Boolean;
+var
+  i: Integer;
+begin
+  Result := False;
+  for i := 0 to High(FVisibleSlides) do
+    if (FVisibleSlides[i].LogicalItemIdx = LogicalIdx) and not FVisibleSlides[i].IsRemoving then
+      Exit(True);
+end;
+
+// Prevents recycling of a slide that is currently in the dying/destruction state
+function TAliveGrid.IsLogicalIdxDying(LogicalIdx: Integer): Boolean;
+var
+  i: Integer;
+begin
+  Result := False;
+  for i := 0 to High(FVisibleSlides) do
+    if (FVisibleSlides[i].LogicalItemIdx = LogicalIdx) and FVisibleSlides[i].IsRemoving then
+      Exit(True);
 end;
 
 procedure TAliveGrid.SetActive(const Value: Boolean);
@@ -352,8 +358,6 @@ begin
     Redraw;
   end;
 end;
-
-{ Property Setters: Update targets and flag caches as dirty to force a redraw }
 
 procedure TAliveGrid.SetItemColor(const Value: TAlphaColor);
 begin
@@ -446,7 +450,7 @@ procedure TAliveGrid.AddItem(const ACaption, AHint, AFilePath, AImagePath: strin
 const
   Colors: array[0..4] of TAlphaColor = ($FFD32F2F, $FF1976D2, $FF388E3C, $FFFBC02D, $FF7B1FA2);
 var
-  LIdx: Integer;
+  LIdx, i: Integer;
   LOrigImg: ISkImage;
   LThumbSurface: ISkSurface;
   LScale, LOffX, LOffY: Single;
@@ -457,7 +461,6 @@ begin
     SetLength(FAllItems, LIdx + 1);
     SetLength(FAllItemIDs, LIdx + 1);
 
-    // Set default caption if empty
     if ACaption = '' then
       FAllItems[LIdx].Caption := 'Item ' + IntToStr(LIdx + 1)
     else
@@ -466,12 +469,10 @@ begin
     FAllItems[LIdx].Hint := AHint;
     FAllItems[LIdx].FilePath := AFilePath;
     FAllItems[LIdx].ImagePath := AImagePath;
-
-    // Assign a rotating base color for items without images
     FAllItems[LIdx].BaseColor := Colors[LIdx mod Length(Colors)];
     FAllItems[LIdx].ImageBitmap := nil;
 
-    // Process Image: Load, scale, and apply Letterbox (KeepAspect)
+    // Load and generate thumbnail if an image path is provided
     if (AImagePath <> '') and FileExists(AImagePath) then
     begin
       try
@@ -479,12 +480,10 @@ begin
         LThumbSurface := TSkSurface.MakeRaster(TSkImageInfo.Create(BaseSlideH, BaseSlideH));
         LThumbSurface.Canvas.Clear(TAlphaColors.Null);
 
-        // Calculate Letterbox scaling: Fit image inside BaseSlideH bounds
         LScale := Min(BaseSlideH / LOrigImg.Width, BaseSlideH / LOrigImg.Height);
         LOffX := (BaseSlideH - LOrigImg.Width * LScale) / 2;
         LOffY := (BaseSlideH - LOrigImg.Height * LScale) / 2;
 
-        // Draw image centered onto the thumbnail surface
         LThumbSurface.Canvas.DrawImageRect(LOrigImg, TRectF.Create(0, 0, LOrigImg.Width, LOrigImg.Height), TRectF.Create(LOffX, LOffY, LOffX + LOrigImg.Width * LScale, LOffY + LOrigImg.Height * LScale), TSkSamplingOptions.Medium, nil);
         FAllItems[LIdx].ImageBitmap := LThumbSurface.MakeImageSnapshot;
       except
@@ -492,256 +491,342 @@ begin
       end;
     end;
 
-    // Assign Unique ID and increment counter
     FAllItemIDs[LIdx] := FNextItemID;
     Inc(FNextItemID);
 
     FNeedsTextCacheUpdate := True;
+    UpdateTextCache;
+
     UpdateVisibleSlides;
+
+    // Trigger spawn animation for the newly added item if visible
+    for i := 0 to High(FVisibleSlides) do
+    begin
+      if FVisibleSlides[i].LogicalItemIdx = LIdx then
+      begin
+        if (FVisibleSlides[i].TargetY > -BaseSlideH) and (FVisibleSlides[i].TargetY < FCurrentHeight) then
+          PlaySpawnAnimation(FVisibleSlides[i]);
+        Break;
+      end;
+    end;
   finally
     FLock.Release;
   end;
 end;
 
 procedure TAliveGrid.RemoveItem(Index: Integer);
+var
+  i: Integer;
 begin
   FLock.Acquire;
   try
-    // Remove from data arrays
     if (Index >= 0) and (Index <= High(FAllItems)) then
     begin
       System.Delete(FAllItems, Index, 1);
       System.Delete(FAllItemIDs, Index, 1);
     end;
 
-    // Trigger despawn animation if the slide is currently visible
-    if (Index >= 0) and (Index <= High(FVisibleSlides)) then
+    // Mark associated slide for removal and instantly clear content cache
+    for i := 0 to High(FVisibleSlides) do
     begin
-      if not FVisibleSlides[Index].IsRemoving then
+      if FVisibleSlides[i].LogicalItemIdx = Index then
       begin
-        FVisibleSlides[Index].IsRemoving := True;
-        FVisibleSlides[Index].IsDirty := True;
-        FVisibleSlides[Index].ContentCache := nil;
-        FVisibleSlides[Index].ContentTargetAlpha := 0;
-        FVisibleSlides[Index].ContentActualAlpha := 0;
-        FVisibleSlides[Index].ControlDot.TargetAlpha := 0;
-        FAnyDirty := True;
+        FVisibleSlides[i].IsRemoving := True;
+        FVisibleSlides[i].IsDirty := True;
+
+        FVisibleSlides[i].ContentCache := nil;
+        FVisibleSlides[i].ContentTargetAlpha := 0;
+        FVisibleSlides[i].ContentActualAlpha := 0;
+        FVisibleSlides[i].ControlDot.TargetAlpha := 0;
+        FVisibleSlides[i].LogicalItemIdx := -1;
       end;
     end;
 
+    // Shift logical indices for slides that come after the removed item
+    for i := 0 to High(FVisibleSlides) do
+    begin
+      if (not FVisibleSlides[i].IsRemoving) and (FVisibleSlides[i].LogicalItemIdx > Index) then
+        Dec(FVisibleSlides[i].LogicalItemIdx);
+    end;
+
     FNeedsTextCacheUpdate := True;
-    UpdateVisibleSlides;
+    UpdateTextCache;
+
+    FMaxScroll := Max(0, ((Length(FAllItems) - 1) * (BaseSlideH + SlideGap)) + BaseSlideH + (2 * BorderGap) - FCurrentHeight);
+    FScrollOffset := EnsureRange(FScrollOffset, 0, FMaxScroll);
+    UpdateSlideMapping;
+    UpdateTargets;
   finally
     FLock.Release;
   end;
 end;
 
-/// <summary>
-/// Determines how many slides can fit in the current control height and
-/// spawns or despawns slides accordingly.
-/// </summary>
 procedure TAliveGrid.UpdateVisibleSlides;
 var
-  MaxVisible, i, ActiveCount: Integer;
+  VisibleCount, PoolSize, LIdx, i: Integer;
+  ItemH: Single;
+  SpaceX, SpaceY: Single;
+  j, RequiredCols: Integer;
 begin
   if FCurrentHeight <= BorderGap + BaseSlideH then
-    MaxVisible := 0
+    VisibleCount := 0
   else
-    MaxVisible := Floor((FCurrentHeight - BorderGap - BaseSlideH) / (BaseSlideH + SlideGap)) + 1;
+    VisibleCount := Floor((FCurrentHeight - BorderGap) / (BaseSlideH + SlideGap)) + 1;
 
-  if Length(FAllItems) < MaxVisible then
-    MaxVisible := Length(FAllItems);
+  // Create a pool slightly larger than visible count for smooth scrolling
+  PoolSize := VisibleCount + 4;
+  if PoolSize < 0 then
+    PoolSize := 0;
 
-  ActiveCount := 0;
-  for i := 0 to High(FVisibleSlides) do
-    if not FVisibleSlides[i].IsRemoving then
-      Inc(ActiveCount);
+  if Length(FAllItems) < PoolSize then
+    PoolSize := Length(FAllItems);
 
-  // Spawn new slides if we have more items than visible slides
-  while (ActiveCount < MaxVisible) and (Length(FAllItems) > ActiveCount) do
+  // Initialize new slides in the pool
+  while Length(FVisibleSlides) < PoolSize do
   begin
-    SpawnVisibleSlide(ActiveCount);
-    Inc(ActiveCount);
-    FAnyDirty := True;
-  end;
+    LIdx := Length(FVisibleSlides);
+    SetLength(FVisibleSlides, LIdx + 1);
 
-  ActiveCount := 0;
-  for i := 0 to High(FVisibleSlides) do
-    if not FVisibleSlides[i].IsRemoving then
-      Inc(ActiveCount);
+    FVisibleSlides[LIdx].LogicalItemIdx := -1;
+    FVisibleSlides[LIdx].TargetY := FCurrentHeight + 1000;
+    FVisibleSlides[LIdx].CurrentY := FVisibleSlides[LIdx].TargetY;
 
-  // Despawn excess slides if control shrunk
-  if ActiveCount > MaxVisible then
-  begin
-    for i := High(FVisibleSlides) downto 0 do
+    FVisibleSlides[LIdx].ActualSlideW := FCurrentWidth - (BorderGap * 2);
+    FVisibleSlides[LIdx].ActualSlideH := BaseSlideH;
+
+    RequiredCols := Max(10, Round(FVisibleSlides[LIdx].ActualSlideW / MinSpaceX));
+    FVisibleSlides[LIdx].Cols := RequiredCols;
+    FVisibleSlides[LIdx].Rows := SlideRows;
+    SetLength(FVisibleSlides[LIdx].Particles, FVisibleSlides[LIdx].Cols * SlideRows);
+    FVisibleSlides[LIdx].TopRightIdx := (FVisibleSlides[LIdx].Cols - 1) * FVisibleSlides[LIdx].Rows;
+
+    SpaceX := FVisibleSlides[LIdx].ActualSlideW / (FVisibleSlides[LIdx].Cols - 1);
+    SpaceY := FVisibleSlides[LIdx].ActualSlideH / (FVisibleSlides[LIdx].Rows - 1);
+    FVisibleSlides[LIdx].RestX := SpaceX;
+    FVisibleSlides[LIdx].RestY := SpaceY;
+    FVisibleSlides[LIdx].RestDiag := Sqrt(SpaceX * SpaceX + SpaceY * SpaceY);
+
+    FVisibleSlides[LIdx].ControlDot.LocalAnchorX := FVisibleSlides[LIdx].ActualSlideW - 21;
+    FVisibleSlides[LIdx].ControlDot.LocalAnchorY := 21;
+
+    // Initialize particle local anchors based on grid spacing
+    for j := 0 to High(FVisibleSlides[LIdx].Particles) do
     begin
-      if ActiveCount <= MaxVisible then
-        Break;
-      if not FVisibleSlides[i].IsRemoving then
-      begin
-        FVisibleSlides[i].IsRemoving := True;
-        FVisibleSlides[i].IsDirty := True;
-        FVisibleSlides[i].ContentCache := nil;
-        FVisibleSlides[i].ContentTargetAlpha := 0;
-        FVisibleSlides[i].ContentActualAlpha := 0;
-        FVisibleSlides[i].ControlDot.TargetAlpha := 0;
-        FAnyDirty := True;
-        Dec(ActiveCount);
-      end;
+      FVisibleSlides[LIdx].Particles[j].LocalAnchorX := (j div SlideRows) * SpaceX;
+      FVisibleSlides[LIdx].Particles[j].LocalAnchorY := (j mod SlideRows) * SpaceY;
+      FVisibleSlides[LIdx].Particles[j].X := FVisibleSlides[LIdx].CurrentX + FVisibleSlides[LIdx].Particles[j].LocalAnchorX;
+      FVisibleSlides[LIdx].Particles[j].Y := FVisibleSlides[LIdx].CurrentY + FVisibleSlides[LIdx].Particles[j].LocalAnchorY;
+      FVisibleSlides[LIdx].Particles[j].OldX := FVisibleSlides[LIdx].Particles[j].X;
+      FVisibleSlides[LIdx].Particles[j].OldY := FVisibleSlides[LIdx].Particles[j].Y;
+      FVisibleSlides[LIdx].Particles[j].VelX := 0;
+      FVisibleSlides[LIdx].Particles[j].VelY := 0;
     end;
   end;
 
+  while Length(FVisibleSlides) > PoolSize do
+    System.Delete(FVisibleSlides, High(FVisibleSlides), 1);
+
+  ItemH := BaseSlideH + SlideGap;
+  if Length(FAllItems) > 0 then
+    FMaxScroll := Max(0, ((Length(FAllItems) - 1) * ItemH) + BaseSlideH + (2 * BorderGap) - FCurrentHeight)
+  else
+    FMaxScroll := 0;
+
+  FScrollOffset := EnsureRange(FScrollOffset, 0, FMaxScroll);
+
+  UpdateSlideMapping;
   UpdateTargets;
 end;
 
-/// <summary>
-/// Updates the TargetX/TargetY coordinates for all visible slides based on their index.
-/// </summary>
-procedure TAliveGrid.UpdateTargets;
+procedure TAliveGrid.UpdateSlideMapping;
 var
-  i, ActiveIdx: Integer;
+  i, j, MissingIdx, FirstNeeded, LastNeeded: Integer;
+  ItemH: Single;
+  MissingIndices: array of Integer;
 begin
-  ActiveIdx := 0;
-  for i := 0 to High(FVisibleSlides) do
-  begin
-    if not FVisibleSlides[i].IsRemoving then
-    begin
-      FVisibleSlides[i].ActualSlideW := FCurrentWidth - (BorderGap * 2);
-      FVisibleSlides[i].ActualSlideH := BaseSlideH;
-
-      if not FVisibleSlides[i].IsDragging then
-      begin
-        FVisibleSlides[i].TargetX := BorderGap;
-        FVisibleSlides[i].TargetY := BorderGap + (ActiveIdx * (BaseSlideH + SlideGap));
-      end;
-      Inc(ActiveIdx);
-      FVisibleSlides[i].IsDirty := True;
-      FAnyDirty := True;
-    end;
-  end;
-end;
-
-/// <summary>
-/// Swaps two slides in the visible array (used for Drag & Drop reordering).
-/// </summary>
-procedure TAliveGrid.SwapSlides(Idx1, Idx2: Integer);
-var
-  TempSlide: TGridSlide;
-begin
-  if (Idx1 < 0) or (Idx1 > High(FVisibleSlides)) or (Idx2 < 0) or (Idx2 > High(FVisibleSlides)) then
+  if Length(FAllItems) = 0 then
+    Exit;
+  if FIsDragging then
     Exit;
 
-  TempSlide := FVisibleSlides[Idx1];
-  FVisibleSlides[Idx1] := FVisibleSlides[Idx2];
-  FVisibleSlides[Idx2] := TempSlide;
-end;
+  ItemH := BaseSlideH + SlideGap;
+  FirstNeeded := Floor(FScrollOffset / ItemH) - 1;
+  LastNeeded := Floor((FScrollOffset + FCurrentHeight) / ItemH) + 1;
 
-/// <summary>
-/// Initializes a new slide and generates its particle grid.
-/// </summary>
-procedure TAliveGrid.SpawnVisibleSlide(ActiveIdx: Integer);
-var
-  LIdx, i, j: Integer;
-  SpaceX, SpaceY, StartX, StartY: Single;
-  BaseTime: Cardinal;
-  RequiredCols: Integer;
-begin
-  LIdx := Length(FVisibleSlides);
-  SetLength(FVisibleSlides, LIdx + 1);
-
-  with FVisibleSlides[LIdx] do
+  // Gather missing logical indices that should be visible
+  for j := FirstNeeded to LastNeeded do
   begin
-    ActualSlideW := FCurrentWidth - (BorderGap * 2);
-    ActualSlideH := BaseSlideH;
-
-    // Calculate particle grid density based on slide width
-    RequiredCols := Max(10, Round(ActualSlideW / MinSpaceX));
-    Cols := RequiredCols;
-    Rows := SlideRows;
-
-    SetLength(Particles, Cols * Rows);
-    IsRemoving := False;
-    IsDead := False;
-    IsDirty := True;
-    IsDragging := False;
-    Cache := nil;
-    SlideSurface := nil;
-    TopRightIdx := (Cols - 1) * Rows; // Bottom-right index used for ControlDot anchor
-
-    // Map this slide to the data item via unique ID
-    ItemID := FAllItemIDs[ActiveIdx];
-
-    if FNeedsTextCacheUpdate then
-      UpdateTextCache;
-
-    // Generate the static content (image/text) cache
-    GenerateContentCache(FVisibleSlides[LIdx], FAllItems[ActiveIdx]);
-    ContentActualAlpha := 0;
-    ContentTargetAlpha := 0;
-
-    // Calculate resting distances between particles for constraints
-    SpaceX := ActualSlideW / (Cols - 1);
-    SpaceY := ActualSlideH / (Rows - 1);
-    RestX := SpaceX;
-    RestY := SpaceY;
-    RestDiag := Sqrt(SpaceX * SpaceX + SpaceY * SpaceY);
-
-    // Target position on screen
-    TargetX := BorderGap;
-    TargetY := BorderGap + (ActiveIdx * (BaseSlideH + SlideGap));
-    CurrentX := TargetX;
-    CurrentY := TargetY;
-
-    // Spawn animation starting point (off-screen bottom-center)
-    StartX := FCurrentWidth / 2;
-    StartY := FCurrentHeight + 50;
-    BaseTime := TThread.GetTickCount;
-
-    // Initialize Magnetic Control Dot
-    ControlDot.LocalAnchorX := ActualSlideW - 21;
-    ControlDot.LocalAnchorY := 21;
-    ControlDot.X := CurrentX + ControlDot.LocalAnchorX;
-    ControlDot.Y := CurrentY + ControlDot.LocalAnchorY;
-    ControlDot.OldX := ControlDot.X;
-    ControlDot.OldY := ControlDot.Y;
-    ControlDot.VelX := 0;
-    ControlDot.VelY := 0;
-    ControlDot.ActivationTime := BaseTime + 1200; // Delay before dot appears
-    ControlDot.ActualAlpha := 0;
-    ControlDot.TargetAlpha := 0;
-
-    MaxActivationTime := 0;
-
-    // Initialize Particles
-    for i := 0 to Cols - 1 do
+    if (j >= 0) and (j < Length(FAllItems)) then
     begin
-      for j := 0 to Rows - 1 do
+      if (not IsLogicalIdxMapped(j)) and (not IsLogicalIdxDying(j)) then
       begin
-        Particles[i * Rows + j].LocalAnchorX := i * SpaceX;
-        Particles[i * Rows + j].LocalAnchorY := j * SpaceY;
-
-        // Stagger spawn positions slightly for a waterfall effect
-        Particles[i * Rows + j].X := StartX + (i * 2) - 10;
-        Particles[i * Rows + j].Y := StartY + (i * 4) + (j * 15);
-        Particles[i * Rows + j].OldX := Particles[i * Rows + j].X;
-        Particles[i * Rows + j].OldY := Particles[i * Rows + j].Y;
-        Particles[i].VelX := 0;
-        Particles[i].VelY := -15; // Initial upward velocity
-
-        // Stagger activation times so particles "fly" into place sequentially
-        Particles[i * Rows + j].ActivationTime := BaseTime + Cardinal(i * 60);
-        if Particles[i * Rows + j].ActivationTime > MaxActivationTime then
-          MaxActivationTime := Particles[i * Rows + j].ActivationTime;
+        SetLength(MissingIndices, Length(MissingIndices) + 1);
+        MissingIndices[High(MissingIndices)] := j;
       end;
     end;
-    MaxActivationTime := MaxActivationTime + 500;
+  end;
+
+  // Assign missing indices to unused or out-of-bounds slides
+  for i := 0 to High(FVisibleSlides) do
+  begin
+    if FVisibleSlides[i].IsRemoving or FVisibleSlides[i].IsDragging then
+      Continue;
+
+    if (FVisibleSlides[i].LogicalItemIdx = -1) or (FVisibleSlides[i].LogicalItemIdx < FirstNeeded) or (FVisibleSlides[i].LogicalItemIdx > LastNeeded) then
+    begin
+      if Length(MissingIndices) > 0 then
+      begin
+        MissingIdx := MissingIndices[High(MissingIndices)];
+        SetLength(MissingIndices, Length(MissingIndices) - 1);
+        RecycleSlide(FVisibleSlides[i], MissingIdx, False);
+      end
+      else
+      begin
+        if FVisibleSlides[i].LogicalItemIdx <> -1 then
+        begin
+          FVisibleSlides[i].LogicalItemIdx := -1;
+          FVisibleSlides[i].TargetY := FCurrentHeight + 1000;
+          FVisibleSlides[i].CurrentY := FVisibleSlides[i].TargetY;
+          FVisibleSlides[i].IsDirty := True;
+        end;
+      end;
+    end;
   end;
 end;
 
-/// <summary>
-/// Renders all text into a single large texture (FTextCache).
-/// This prevents text cropping and allows fast drawing by slicing the texture per slide.
-/// </summary>
+procedure TAliveGrid.RecycleSlide(var ASlide: TGridSlide; NewLogicalIdx: Integer; Animate: Boolean);
+var
+  i: Integer;
+begin
+  if (NewLogicalIdx < 0) or (NewLogicalIdx > High(FAllItems)) then
+    Exit;
+
+  ASlide.LogicalItemIdx := NewLogicalIdx;
+  ASlide.ItemID := FAllItemIDs[NewLogicalIdx];
+  ASlide.IsRemoving := False;
+  ASlide.IsDead := False;
+
+  ASlide.ActualSlideW := FCurrentWidth - (BorderGap * 2);
+  ASlide.ActualSlideH := BaseSlideH;
+
+  ASlide.TargetX := BorderGap;
+  ASlide.TargetY := BorderGap + (NewLogicalIdx * (BaseSlideH + SlideGap)) - FScrollOffset;
+
+  ASlide.CurrentX := ASlide.TargetX;
+  ASlide.CurrentY := ASlide.TargetY;
+
+  // Reset particles to their anchor positions inside the slide
+  for i := 0 to High(ASlide.Particles) do
+  begin
+    ASlide.Particles[i].X := ASlide.CurrentX + ASlide.Particles[i].LocalAnchorX;
+    ASlide.Particles[i].Y := ASlide.CurrentY + ASlide.Particles[i].LocalAnchorY;
+    ASlide.Particles[i].OldX := ASlide.Particles[i].X;
+    ASlide.Particles[i].OldY := ASlide.Particles[i].Y;
+    ASlide.Particles[i].VelX := 0;
+    ASlide.Particles[i].VelY := 0;
+    ASlide.Particles[i].ActivationTime := 0;
+  end;
+
+  ASlide.ControlDot.X := ASlide.CurrentX + ASlide.ControlDot.LocalAnchorX;
+  ASlide.ControlDot.Y := ASlide.CurrentY + ASlide.ControlDot.LocalAnchorY;
+  ASlide.ControlDot.TargetAlpha := 1.0;
+  ASlide.ControlDot.ActualAlpha := 1.0;
+
+  // Only restore content alpha if the slide isn't currently fading out
+  if ASlide.ContentTargetAlpha <> 0 then
+  begin
+    ASlide.ContentTargetAlpha := 1.0;
+    ASlide.ContentActualAlpha := 1.0;
+  end;
+
+  GenerateContentCache(ASlide, FAllItems[NewLogicalIdx]);
+  ASlide.IsDirty := True;
+
+  if Animate then
+    PlaySpawnAnimation(ASlide);
+end;
+
+procedure TAliveGrid.PlaySpawnAnimation(var ASlide: TGridSlide);
+var
+  i, j: Integer;
+  SpaceX, SpaceY, StartX, StartY: Single;
+  BaseTime: Cardinal;
+begin
+  SpaceX := ASlide.ActualSlideW / (ASlide.Cols - 1);
+  SpaceY := ASlide.ActualSlideH / (ASlide.Rows - 1);
+  StartX := FCurrentWidth / 2;
+  StartY := FCurrentHeight + 50;
+  BaseTime := TThread.GetTickCount;
+
+  ASlide.IsDirty := True;
+  ASlide.ContentActualAlpha := 0;
+  ASlide.ContentTargetAlpha := 0;
+  ASlide.ControlDot.ActualAlpha := 0;
+  ASlide.ControlDot.TargetAlpha := 0;
+  ASlide.ControlDot.ActivationTime := BaseTime + 1200;
+
+  // Calculate staggered activation times for particles to create a flying-in effect
+  ASlide.MaxActivationTime := 0;
+  for i := 0 to ASlide.Cols - 1 do
+  begin
+    for j := 0 to ASlide.Rows - 1 do
+    begin
+      ASlide.Particles[i * ASlide.Rows + j].X := StartX + (i * 2) - 10;
+      ASlide.Particles[i * ASlide.Rows + j].Y := StartY + (i * 4) + (j * 15);
+      ASlide.Particles[i * ASlide.Rows + j].OldX := ASlide.Particles[i * ASlide.Rows + j].X;
+      ASlide.Particles[i * ASlide.Rows + j].OldY := ASlide.Particles[i * ASlide.Rows + j].Y;
+      ASlide.Particles[i * ASlide.Rows + j].VelX := 0;
+      ASlide.Particles[i * ASlide.Rows + j].VelY := -15;
+      ASlide.Particles[i * ASlide.Rows + j].ActivationTime := BaseTime + Cardinal(i * 60);
+      if ASlide.Particles[i * ASlide.Rows + j].ActivationTime > ASlide.MaxActivationTime then
+        ASlide.MaxActivationTime := ASlide.Particles[i * ASlide.Rows + j].ActivationTime;
+    end;
+  end;
+  ASlide.MaxActivationTime := ASlide.MaxActivationTime + 500;
+end;
+
+procedure TAliveGrid.UpdateTargets;
+var
+  i: Integer;
+begin
+  for i := 0 to High(FVisibleSlides) do
+  begin
+    FVisibleSlides[i].ActualSlideW := FCurrentWidth - (BorderGap * 2);
+    FVisibleSlides[i].ActualSlideH := BaseSlideH;
+
+    if not FVisibleSlides[i].IsDragging then
+    begin
+      FVisibleSlides[i].TargetX := BorderGap;
+      if (FVisibleSlides[i].LogicalItemIdx >= 0) and (not FVisibleSlides[i].IsRemoving) then
+        FVisibleSlides[i].TargetY := BorderGap + (FVisibleSlides[i].LogicalItemIdx * (BaseSlideH + SlideGap)) - FScrollOffset
+      else
+        FVisibleSlides[i].TargetY := FCurrentHeight + 1000;
+    end;
+    FVisibleSlides[i].IsDirty := True;
+  end;
+  FAnyDirty := True;
+end;
+
+procedure TAliveGrid.SwapDataItems(Idx1, Idx2: Integer);
+var
+  TempData: TGridItemData;
+  TempID: Integer;
+begin
+  if (Idx1 < 0) or (Idx1 > High(FAllItems)) or (Idx2 < 0) or (Idx2 > High(FAllItems)) or (Idx1 = Idx2) then
+    Exit;
+
+  TempData := FAllItems[Idx1];
+  FAllItems[Idx1] := FAllItems[Idx2];
+  FAllItems[Idx2] := TempData;
+
+  TempID := FAllItemIDs[Idx1];
+  FAllItemIDs[Idx1] := FAllItemIDs[Idx2];
+  FAllItemIDs[Idx2] := TempID;
+
+  FNeedsTextCacheUpdate := True;
+  UpdateTextCache;
+end;
+
 procedure TAliveGrid.UpdateTextCache;
 var
   i, LCount: Integer;
@@ -761,7 +846,6 @@ begin
     Exit;
   end;
 
-  // Determine font style
   LSkStyle := TSkFontStyle.Normal;
   if FFontIsBold then
     LSkStyle := TSkFontStyle.Bold;
@@ -770,9 +854,9 @@ begin
 
   LTypeface := TSkTypeface.MakeFromName(FFontName, LSkStyle);
   LFont := TSkFont.Create(LTypeface, FFontSize);
-  LTinyFont := TSkFont.Create(LTypeface, 10); // Smaller font for file paths
+  LTinyFont := TSkFont.Create(LTypeface, 10);
 
-  // Create a surface tall enough to hold all items' text stacked vertically
+  // Create a large surface holding all text entries to reduce draw calls
   FTextCacheInfo := TSkImageInfo.Create(Round(FCurrentWidth), LCount * BaseSlideH);
   FTextCacheSurface := TSkSurface.MakeRaster(FTextCacheInfo);
   FTextCacheSurface.Canvas.Clear(TAlphaColors.Null);
@@ -780,7 +864,6 @@ begin
   LPaint := TSkPaint.Create;
   LPaint.AntiAlias := True;
 
-  // Draw all text entries
   for i := 0 to LCount - 1 do
   begin
     LPaint.Color := FCaptionColor;
@@ -797,10 +880,6 @@ begin
   FNeedsTextCacheUpdate := False;
 end;
 
-/// <summary>
-/// Draws the static content (Image/Square + Text) of a slide into a cache.
-/// Also applies gradient fading to the edges of the image to blend it into the fluid shape.
-/// </summary>
 procedure TAliveGrid.GenerateContentCache(var ASlide: TGridSlide; const AData: TGridItemData);
 var
   LSurface: ISkSurface;
@@ -818,7 +897,6 @@ begin
 
   ItemIdx := FindItemIdxByID(ASlide.ItemID);
 
-  // 1. Draw left colored square or image thumbnail (100x100)
   LRect := TRectF.Create(0, 0, BaseSlideH, BaseSlideH);
   if AData.ImageBitmap <> nil then
   begin
@@ -830,38 +908,28 @@ begin
     LSurface.Canvas.DrawRect(LRect, LPaint);
   end;
 
-  // 2. Draw Text by slicing the global FTextCache based on ItemID mapping
+  // Draw the specific text segment from the global text cache
   if (ItemIdx <> -1) and (FTextCache <> nil) then
-  begin
     LSurface.Canvas.DrawImageRect(FTextCache, TRectF.Create(0, ItemIdx * BaseSlideH, ASlide.ActualSlideW, (ItemIdx + 1) * BaseSlideH), TRectF.Create(0, 0, ASlide.ActualSlideW, BaseSlideH), TSkSamplingOptions.Medium, LPaint);
-  end;
 
-  // 3. Gradient Fade on the 4 edges of the image ONLY to blend smoothly into the blob
   LPaint.Color := FadeColor;
 
-  // Top edge fade
+  // Draw gradient edges to smoothly blend the image corners into the background
   LPaint.Shader := TSkShader.MakeGradientLinear(TPointF.Create(0, 0), TPointF.Create(0, 15), FadeColor, TAlphaColors.Null, TSkTileMode.Clamp);
   LSurface.Canvas.DrawRect(TRectF.Create(0, 0, BaseSlideH, 15), LPaint);
 
-  // Bottom edge fade
   LPaint.Shader := TSkShader.MakeGradientLinear(TPointF.Create(0, BaseSlideH), TPointF.Create(0, BaseSlideH - 15), FadeColor, TAlphaColors.Null, TSkTileMode.Clamp);
   LSurface.Canvas.DrawRect(TRectF.Create(0, BaseSlideH - 15, BaseSlideH, BaseSlideH), LPaint);
 
-  // Left edge fade
   LPaint.Shader := TSkShader.MakeGradientLinear(TPointF.Create(0, 0), TPointF.Create(15, 0), FadeColor, TAlphaColors.Null, TSkTileMode.Clamp);
   LSurface.Canvas.DrawRect(TRectF.Create(0, 0, 15, BaseSlideH), LPaint);
 
-  // Right edge fade
   LPaint.Shader := TSkShader.MakeGradientLinear(TPointF.Create(BaseSlideH, 0), TPointF.Create(BaseSlideH - 15, 0), FadeColor, TAlphaColors.Null, TSkTileMode.Clamp);
   LSurface.Canvas.DrawRect(TRectF.Create(BaseSlideH - 15, 0, BaseSlideH, BaseSlideH), LPaint);
 
   ASlide.ContentCache := LSurface.MakeImageSnapshot;
 end;
 
-/// <summary>
-/// Updates particle velocities and positions based on Verlet integration.
-/// Handles mouse interaction (repulsion) and drag logic.
-/// </summary>
 procedure TAliveGrid.ProcessSlidePhysics(var ASlide: TGridSlide; const NowTime: Cardinal; const LW, LH: Single);
 var
   i: Integer;
@@ -876,7 +944,7 @@ begin
     begin
       if IsDragging then
       begin
-        // If dragging, snap instantly to drag target
+        // Snap directly to drag target for immediate response
         CurrentX := DragTargetX;
         CurrentY := DragTargetY;
       end
@@ -892,7 +960,7 @@ begin
     for i := 0 to High(Particles) do
     begin
       // Mouse Repulsion Effect
-      if FIsMouseOver and not IsDragging then
+      if FIsMouseOver and not IsDragging and not IsRemoving then
       begin
         Ldx := Particles[i].X - FMousePos.X;
         Ldy := Particles[i].Y - FMousePos.Y;
@@ -917,7 +985,7 @@ begin
       Particles[i].VelX := Particles[i].VelX * 0.85;
       Particles[i].VelY := Particles[i].VelY * 0.85;
 
-      // Clamp velocities to prevent explosions
+      // Clamp velocities to prevent physics explosions
       Particles[i].VelX := EnsureRange(Particles[i].VelX, -40, 40);
       Particles[i].VelY := EnsureRange(Particles[i].VelY, -40, 40);
 
@@ -932,10 +1000,6 @@ begin
   end;
 end;
 
-/// <summary>
-/// Enforces structural integrity by applying distance constraints between particles.
-/// Runs multiple iterations to approximate a rigid/springy grid.
-/// </summary>
 procedure TAliveGrid.ProcessSlideConstraints(var ASlide: TGridSlide; const NowTime: Cardinal; const LW, LH: Single);
 var
   i, j, Idx1, Idx2, iter: Integer;
@@ -950,7 +1014,7 @@ begin
       begin
         if IsRemoving then
         begin
-          // Fly towards bottom center when dying
+          // Collapse towards bottom center when dying
           LTargetX := LW / 2;
           LTargetY := LH + 150;
           Particles[i].X := Particles[i].X + (LTargetX - Particles[i].X) * 0.05;
@@ -1041,10 +1105,6 @@ begin
   end;
 end;
 
-/// <summary>
-/// Renders the slide into its individual cache surface.
-/// Draws fluid shape, shadow, content texture, and control dot.
-/// </summary>
 procedure TAliveGrid.ProcessSlideCaching(var ASlide: TGridSlide; const NowTime: Cardinal; const LW, LH: Single; const ABlurPaint, ABlackPaint, AContentPaint, AControlDotPaint, AHighlightPaint: ISkPaint);
 var
   LBuilder: ISkPathBuilder;
@@ -1055,15 +1115,13 @@ var
   FAlphaByte, DR, DG, DB: Byte;
   i: Integer;
   LTargetX, LTargetY, LDistToMouse: Single;
-  LIsSnapping: Boolean;
 begin
   with ASlide do
   begin
-    // --- Sync ControlDot position to the top-right particle ---
     LTargetX := Particles[TopRightIdx].X + 7;
     LTargetY := Particles[TopRightIdx].Y - 7;
 
-    // ControlDot Magnetic Snap to Mouse
+    // Control dot follows mouse if close enough, otherwise snaps to top right
     if FIsMouseOver and not IsDragging and not IsRemoving then
     begin
       LDistToMouse := Sqrt(Sqr(FMousePos.X - LTargetX) + Sqr(FMousePos.Y - LTargetY));
@@ -1084,18 +1142,25 @@ begin
       ControlDot.Y := LTargetY;
     end;
 
-    // Trigger fade-in animation when spawn time is reached
     if (NowTime > ControlDot.ActivationTime) and (ControlDot.TargetAlpha < 1.0) and not FIsResizing then
     begin
       ControlDot.TargetAlpha := 1.0;
       ContentTargetAlpha := 1.0;
     end;
 
-    // Interpolate Alphas
+    if (NowTime > ControlDot.ActivationTime) and not IsRemoving then
+    begin
+      if ControlDot.TargetAlpha < 1.0 then
+        ControlDot.TargetAlpha := 1.0;
+
+      if ContentTargetAlpha < 1.0 then
+        ContentTargetAlpha := 1.0;
+    end;
+
     ControlDot.ActualAlpha := ControlDot.ActualAlpha + (ControlDot.TargetAlpha - ControlDot.ActualAlpha) * 0.05;
     ContentActualAlpha := ContentActualAlpha + (ContentTargetAlpha - ContentActualAlpha) * 0.05;
 
-    // --- Initialize Slide Surface if needed ---
+    // Reallocate slide surface if dimensions changed
     if (SlideSurface = nil) or (SlideSurfaceInfo.Width <> Round(LW)) or (SlideSurfaceInfo.Height <> Round(LH)) then
     begin
       SlideSurfaceInfo := TSkImageInfo.Create(Round(LW), Round(LH));
@@ -1104,43 +1169,39 @@ begin
 
     SlideSurface.Canvas.Clear(TAlphaColors.Null);
 
-    // Build Fluid Path from particles
+    // Construct path of all particle circles to form the liquid blob
     LBuilder := TSkPathBuilder.Create;
     LBuilder.FillType := TSkPathFillType.Winding;
     for i := 0 to High(Particles) do
       LBuilder.AddCircle(Particles[i].X, Particles[i].Y, ParticleRadius);
     LPath := LBuilder.Detach;
 
-    // 1. Draw Fluid Shape with Blur (creates the blob outline)
+    // Draw blurred blob and then overlay it with the black/shadow paint
     SlideSurface.Canvas.DrawPath(LPath, ABlurPaint);
     TempImg := SlideSurface.MakeImageSnapshot;
 
     SlideSurface.Canvas.Clear(TAlphaColors.Null);
-    // Draw the blurred shape back with shadow and color filters
     SlideSurface.Canvas.DrawImage(TempImg, 0, 0, ABlackPaint);
 
-    // 2. Draw Content Texture (Text + Image)
+    // Draw content cache (image + text) with fading
     ContentAlpha := ContentActualAlpha;
     if (ContentAlpha > 0.01) and (ContentCache <> nil) then
     begin
       AContentPaint.AlphaF := ContentAlpha;
-      LIsSnapping := (Abs(CurrentX - TargetX) > 0.5) or (Abs(CurrentY - TargetY) > 0.5);
 
-      // If dragging or snapping, bind content to particle[0] so it flows with the jelly motion
-      if IsDragging or LIsSnapping then
+      if IsDragging or (Abs(CurrentX - TargetX) > 0.5) or (Abs(CurrentY - TargetY) > 0.5) then
         SlideSurface.Canvas.DrawImage(ContentCache, Particles[0].X, Particles[0].Y, AContentPaint)
       else
         SlideSurface.Canvas.DrawImage(ContentCache, CurrentX, CurrentY, AContentPaint);
     end;
 
-    // 3. Draw Control Dot
+    // Draw control dot with radial gradient and highlight
     DotAlpha := ControlDot.ActualAlpha;
     if DotAlpha > 0.01 then
     begin
       FAlphaByte := Round(((FActualDotColor shr 24) and $FF) * DotAlpha);
       C1 := (FAlphaByte shl 24) or (FActualDotColor and $00FFFFFF);
 
-      // Calculate darker version of dot color for 3D radial gradient effect
       DR := ((FActualDotColor shr 16) and $FF) div 3;
       DG := ((FActualDotColor shr 8) and $FF) div 3;
       DB := (FActualDotColor and $FF) div 3;
@@ -1149,20 +1210,15 @@ begin
       AControlDotPaint.Shader := TSkShader.MakeGradientRadial(TPointF.Create(ControlDot.X - 3, ControlDot.Y - 3), 15, C1, C2, TSkTileMode.Clamp);
       SlideSurface.Canvas.DrawCircle(ControlDot.X, ControlDot.Y, 9, AControlDotPaint);
 
-      // Draw small specular highlight on the dot
       AHighlightPaint.Color := (Round($CC * DotAlpha) shl 24) or $00FFFFFF;
       SlideSurface.Canvas.DrawCircle(ControlDot.X - 3, ControlDot.Y - 3, 2.5, AHighlightPaint);
     end;
 
-    // Finalize cache for this slide
     Cache := SlideSurface.MakeImageSnapshot;
     IsDirty := False;
   end;
 end;
 
-/// <summary>
-/// Draws the static background dot-matrix based on Intensity property.
-/// </summary>
 procedure TAliveGrid.DrawBackgroundCache;
 var
   LDotPaint: ISkPaint;
@@ -1183,7 +1239,7 @@ begin
   DarkBlue := $FF050015;
   BrightBlue := $FF0055FF;
 
-  // Generate dot grid
+  // Draw dotted grid pattern based on intensity
   for x := 0 to (FLastWidth div 10) do
   begin
     for y := 0 to (FLastHeight div 10) do
@@ -1208,10 +1264,6 @@ begin
   FThread.Start;
 end;
 
-/// <summary>
-/// The main background loop. Continuously calculates physics, updates caches,
-/// and composes the final image (FMainImage) to be drawn by the UI thread.
-/// </summary>
 procedure TAliveGrid.ExecuteRenderLoop;
 var
   NowTime: Cardinal;
@@ -1224,8 +1276,12 @@ var
   IsDead: Boolean;
   LBlur, LShadowDown, LShadowUp, LCombinedShadow, LDotShadow: ISkImageFilter;
   LBlurPaint, LBlackPaint, LHighlightPaint, LControlDotPaint, LContentPaint: ISkPaint;
+  LScrollBarPaint: ISkPaint;
+  IsScrollingNow: Boolean;
 begin
-  // Pre-create Image Filters for performance
+  LScrollBarPaint := TSkPaint.Create;
+  LScrollBarPaint.AntiAlias := True;
+
   LBlur := TSkImageFilter.MakeBlur(12, 12, nil, TSkTileMode.Decal);
   LBlurPaint := TSkPaint.Create;
   LBlurPaint.AntiAlias := True;
@@ -1252,6 +1308,8 @@ begin
     NowTime := TThread.GetTickCount;
     LChanged := False;
 
+    IsScrollingNow := ((NowTime - FLastScrollTime < 150) and (FLastScrollTime > 0)) or FIsDraggingScrollBar;
+
     if FActive then
     begin
       FLock.Acquire;
@@ -1264,7 +1322,7 @@ begin
           if FNeedsTextCacheUpdate then
             UpdateTextCache;
 
-          // Smoothly lerp Actual Colors to Target Colors
+          // Smoothly transition colors towards target colors
           if FActualItemColor <> FTargetItemColor then
           begin
             FActualItemColor := LerpColor(FActualItemColor, FTargetItemColor, 0.05);
@@ -1287,30 +1345,56 @@ begin
             FAnyDirty := True;
           end;
 
-          // Setup Color Filter Matrix to tint the blurred blob shape
+          // Setup color matrix for the black/shadow paint
           R := ((FActualItemColor shr 16) and $FF) / 255.0;
           G := ((FActualItemColor shr 8) and $FF) / 255.0;
           B := (FActualItemColor and $FF) / 255.0;
-          LMatrix := TSkColorMatrix.Create(0, 0, 0, 0, R, 0, 0, 0, 0, G, 0, 0, 0, 0, B, 0, 0, 0, 2.5, -0.2 // Alpha multiplier for extra opacity
-          );
+          LMatrix := TSkColorMatrix.Create(0, 0, 0, 0, R, 0, 0, 0, 0, G, 0, 0, 0, 0, B, 0, 0, 0, 2.5, -0.2);
           LBlackPaint.ColorFilter := TSkColorFilter.MakeMatrix(LMatrix);
 
-          // Setup Drop Shadows for the blob
           LShadowDown := TSkImageFilter.MakeDropShadow(0, 4, 8, 8, FActualShadowColor, nil);
           LShadowUp := TSkImageFilter.MakeDropShadow(0, -2, 6, 6, FActualShadowColor, nil);
           LCombinedShadow := TSkImageFilter.MakeCompose(LShadowUp, LShadowDown);
           LBlackPaint.ImageFilter := LCombinedShadow;
 
-          // Process all visible slides
           if Length(FVisibleSlides) > 0 then
           begin
             for S := 0 to High(FVisibleSlides) do
             begin
-              // 1. PHYSICS: Update positions
-              ProcessSlidePhysics(FVisibleSlides[S], NowTime, LW, LH);
-              ProcessSlideConstraints(FVisibleSlides[S], NowTime, LW, LH);
+              // Removing slides get absolute priority and ignore scroll-pauses
+              if FVisibleSlides[S].IsRemoving then
+              begin
+                ProcessSlidePhysics(FVisibleSlides[S], NowTime, LW, LH);
+                ProcessSlideConstraints(FVisibleSlides[S], NowTime, LW, LH);
+              end
+              else if (not IsScrollingNow) or FVisibleSlides[S].IsDragging then
+              begin
+                ProcessSlidePhysics(FVisibleSlides[S], NowTime, LW, LH);
+                ProcessSlideConstraints(FVisibleSlides[S], NowTime, LW, LH);
+              end
+              else
+              begin
+                // Fast snap particles to targets during fast scrolling without physics
+                FVisibleSlides[S].CurrentX := FVisibleSlides[S].CurrentX + (FVisibleSlides[S].TargetX - FVisibleSlides[S].CurrentX) * 0.45;
+                FVisibleSlides[S].CurrentY := FVisibleSlides[S].CurrentY + (FVisibleSlides[S].TargetY - FVisibleSlides[S].CurrentY) * 0.45;
 
-              // Check if slide is completely dead (fallen off screen)
+                for i := 0 to High(FVisibleSlides[S].Particles) do
+                begin
+                  FVisibleSlides[S].Particles[i].x := FVisibleSlides[S].CurrentX + FVisibleSlides[S].Particles[i].LocalAnchorX;
+                  FVisibleSlides[S].Particles[i].y := FVisibleSlides[S].CurrentY + FVisibleSlides[S].Particles[i].LocalAnchorY;
+                  FVisibleSlides[S].Particles[i].OldX := FVisibleSlides[S].Particles[i].x;
+                  FVisibleSlides[S].Particles[i].OldY := FVisibleSlides[S].Particles[i].y;
+                  FVisibleSlides[S].Particles[i].VelX := 0;
+                  FVisibleSlides[S].Particles[i].VelY := 0;
+                end;
+
+                FVisibleSlides[S].ControlDot.X := FVisibleSlides[S].Particles[FVisibleSlides[S].TopRightIdx].x + 7;
+                FVisibleSlides[S].ControlDot.Y := FVisibleSlides[S].Particles[FVisibleSlides[S].TopRightIdx].y - 7;
+
+                FVisibleSlides[S].IsDirty := True;
+              end;
+
+              // Check if removing slide is completely out of view (dead)
               if FVisibleSlides[S].IsRemoving then
               begin
                 IsDead := True;
@@ -1325,7 +1409,7 @@ begin
                 FVisibleSlides[S].IsDead := IsDead;
               end;
 
-              // Check if slide requires a redraw
+              // Check various conditions to mark the slide dirty for redraw
               if not FVisibleSlides[S].IsDirty then
               begin
                 with FVisibleSlides[S] do
@@ -1350,8 +1434,8 @@ begin
                     end;
                   end;
 
-                  // Force redraw if mouse is interacting with this slide's bounds
-                  if FIsMouseOver and not IsDragging then
+                  // Mark dirty if mouse is interacting closely
+                  if FIsMouseOver and not IsDragging and not IsRemoving then
                   begin
                     if (FMousePos.X > CurrentX - 70) and (FMousePos.X < CurrentX + ActualSlideW + 70) and (FMousePos.Y > CurrentY - 70) and (FMousePos.Y < CurrentY + ActualSlideH + 70) then
                       IsDirty := True;
@@ -1359,8 +1443,8 @@ begin
                 end;
               end;
 
-              // 2. CACHING: Redraw slide bitmap if marked dirty
-              if FVisibleSlides[S].IsDirty then
+              // Re-render the slide cache if dirty
+              if FVisibleSlides[S].IsDirty or FVisibleSlides[S].IsRemoving then
               begin
                 FAnyDirty := True;
                 LChanged := True;
@@ -1368,16 +1452,52 @@ begin
               end;
             end;
 
-            // Cleanup dead slides from array
+            // Clean up dead slides and return them to the pool
             for i := High(FVisibleSlides) downto 0 do
+            begin
               if FVisibleSlides[i].IsDead then
-                System.Delete(FVisibleSlides, i, 1);
+              begin
+                FVisibleSlides[i].IsRemoving := False;
+                FVisibleSlides[i].IsDead := False;
+                FVisibleSlides[i].LogicalItemIdx := -1;
+                FVisibleSlides[i].TargetY := FCurrentHeight + 1000;
+                FVisibleSlides[i].CurrentY := FVisibleSlides[i].TargetY;
+                FVisibleSlides[i].ContentCache := nil;
+                FVisibleSlides[i].ContentActualAlpha := 0;
+                FVisibleSlides[i].ContentTargetAlpha := 0;
+                FVisibleSlides[i].ControlDot.ActualAlpha := 0;
+                FVisibleSlides[i].ControlDot.TargetAlpha := 0;
+              end;
+            end;
+
+            UpdateSlideMapping;
           end;
+
+          // Update scroll bar visibility and position
+          if FMaxScroll > 0 then
+          begin
+            FScrollBarDot.X := FCurrentWidth - 15;
+            FScrollBarDot.Y := BorderGap + (FScrollOffset / FMaxScroll) * (FCurrentHeight - BorderGap * 2 - ScrollBarHeight);
+
+            if (NowTime - FLastScrollTime < 1000) or FIsDraggingScrollBar or ((FIsMouseOver) and (FMousePos.X > FCurrentWidth - 30)) then
+              FScrollBarDot.TargetAlpha := 1.0
+            else
+              FScrollBarDot.TargetAlpha := 0.0;
+          end
+          else
+          begin
+            FScrollBarDot.TargetAlpha := 0.0;
+            FScrollBarDot.Y := BorderGap;
+          end;
+
+          FScrollBarDot.ActualAlpha := FScrollBarDot.ActualAlpha + (FScrollBarDot.TargetAlpha - FScrollBarDot.ActualAlpha) * 0.05;
+          if Abs(FScrollBarDot.ActualAlpha - FScrollBarDot.TargetAlpha) > 0.01 then
+            FAnyDirty := True;
 
           if FMainImage = nil then
             FAnyDirty := True;
 
-          // 3. COMPOSITE: Draw all slides onto the main surface
+          // Rebuild main image if something changed
           if FAnyDirty then
           begin
             if (FMainSurface = nil) or (FMainSurfaceInfo.Width <> Round(LW)) or (FMainSurfaceInfo.Height <> Round(LH)) then
@@ -1390,17 +1510,28 @@ begin
             if FBackgroundImage <> nil then
               FMainSurface.Canvas.DrawImage(FBackgroundImage, 0, 0);
 
-            // Draw normal slides first
+            // Draw standard slides
             for S := 0 to High(FVisibleSlides) do
             begin
               if not FVisibleSlides[S].IsDragging then
                 if FVisibleSlides[S].Cache <> nil then
+                begin
                   FMainSurface.Canvas.DrawImage(FVisibleSlides[S].Cache, 0, 0);
+                end;
             end;
 
-            // Draw dragged slide last so it appears on top
+            // Draw dragged slide last to ensure it stays on top
             if (FDraggedSlideIdx >= 0) and (FDraggedSlideIdx <= High(FVisibleSlides)) and (FVisibleSlides[FDraggedSlideIdx].Cache <> nil) then
               FMainSurface.Canvas.DrawImage(FVisibleSlides[FDraggedSlideIdx].Cache, 0, 0);
+
+            // Draw scroll bar dot if visible
+            if (FMaxScroll > 0) and (FScrollBarDot.ActualAlpha > 0.01) then
+            begin
+              LScrollBarPaint.Shader := nil;
+              LScrollBarPaint.Color := FActualDotColor;
+              LScrollBarPaint.AlphaF := FScrollBarDot.ActualAlpha;
+              FMainSurface.Canvas.DrawRoundRect(TRectF.Create(FScrollBarDot.X, FScrollBarDot.Y, FScrollBarDot.X + ScrollBarWidth, FScrollBarDot.Y + ScrollBarHeight), 3, 3, LScrollBarPaint);
+            end;
 
             FMainImage := FMainSurface.MakeImageSnapshot;
             FAnyDirty := False;
@@ -1411,16 +1542,15 @@ begin
         FLock.Release;
       end;
 
-      // Trigger UI Thread redraw if something changed
       if LChanged or FIsMouseOver or FIsDragging then
         SafeInvalidate;
     end;
 
-    // Adaptive sleep to save CPU when idle, but smooth when interacting
+    // Throttle thread sleep depending on activity
     if LChanged or FIsMouseOver or FIsDragging then
-      Sleep(16) // ~60 FPS
+      Sleep(16)
     else
-      Sleep(50); // Idle state
+      Sleep(50);
   end;
 end;
 
@@ -1430,7 +1560,7 @@ begin
   if Assigned(FThread) then
   begin
     FThread.Terminate;
-    Sleep(50); // Allow thread to exit gracefully
+    Sleep(50);
   end;
 end;
 
@@ -1447,27 +1577,18 @@ begin
     Redraw;
 end;
 
-/// <summary>
-/// Returns the bounding box for the control dot of a specific slide.
-/// Used for hit testing during mouse clicks.
-/// </summary>
 function TAliveGrid.GetDotRect(Idx: Integer): TRectF;
 begin
   if (Idx < 0) or (Idx > High(FVisibleSlides)) then
     Exit(TRectF.Empty);
 
   with FVisibleSlides[Idx] do
-  begin
     Result := TRectF.Create(ControlDot.X - 9, ControlDot.Y - 9, ControlDot.X + 9, ControlDot.Y + 9);
-  end;
 end;
 
-/// <summary>
-/// Handles control resizing. Rebuilds grids, updates caches, and realigns particles.
-/// </summary>
 procedure TAliveGrid.Resize;
 var
-  i, j, RequiredCols, LItemIdx: Integer;
+  i, j, RequiredCols: Integer;
   SpaceX, SpaceY: Single;
 begin
   inherited;
@@ -1478,8 +1599,8 @@ begin
     if (FCurrentWidth > 0) and (FCurrentHeight > 0) then
     begin
       FIsResizing := True;
+      UpdateVisibleSlides;
 
-      // Rebuild background if dimensions changed
       if (FLastWidth <> Round(FCurrentWidth)) or (FLastHeight <> Round(FCurrentHeight)) then
       begin
         FLastWidth := Round(FCurrentWidth);
@@ -1491,13 +1612,12 @@ begin
       if FNeedsTextCacheUpdate then
         UpdateTextCache;
 
-      // Realign all visible slides to new dimensions
+      // Adjust internal particle grid for all visible slides on resize
       for i := 0 to High(FVisibleSlides) do
       begin
         FVisibleSlides[i].ActualSlideW := FCurrentWidth - (BorderGap * 2);
         FVisibleSlides[i].ActualSlideH := BaseSlideH;
 
-        // Adjust particle columns based on new width
         RequiredCols := Max(10, Round(FVisibleSlides[i].ActualSlideW / MinSpaceX));
         if FVisibleSlides[i].Cols <> RequiredCols then
         begin
@@ -1506,19 +1626,12 @@ begin
           FVisibleSlides[i].TopRightIdx := (FVisibleSlides[i].Cols - 1) * SlideRows;
         end;
 
-        // Recalculate resting distances
         SpaceX := FVisibleSlides[i].ActualSlideW / (FVisibleSlides[i].Cols - 1);
         SpaceY := FVisibleSlides[i].ActualSlideH / (SlideRows - 1);
         FVisibleSlides[i].RestX := SpaceX;
         FVisibleSlides[i].RestY := SpaceY;
         FVisibleSlides[i].RestDiag := Sqrt(SpaceX * SpaceX + SpaceY * SpaceY);
 
-        // Regenerate Content Cache (Text/Image) for new width
-        LItemIdx := FindItemIdxByID(FVisibleSlides[i].ItemID);
-        if LItemIdx <> -1 then
-          GenerateContentCache(FVisibleSlides[i], FAllItems[LItemIdx]);
-
-        // Re-anchor particles
         for j := 0 to High(FVisibleSlides[i].Particles) do
         begin
           FVisibleSlides[i].Particles[j].LocalAnchorX := (j div SlideRows) * SpaceX;
@@ -1534,14 +1647,9 @@ begin
         if not FVisibleSlides[i].IsDragging then
           UpdateTargets;
 
-        // Hide dots during resize
-        FVisibleSlides[i].ControlDot.TargetAlpha := 0;
-        FVisibleSlides[i].ControlDot.ActualAlpha := 0;
-
         FVisibleSlides[i].IsDirty := True;
       end;
 
-      // Force immediate redraw of main surface during resize
       if (FMainSurface = nil) or (FMainSurfaceInfo.Width <> FLastWidth) or (FMainSurfaceInfo.Height <> FLastHeight) then
       begin
         FMainSurfaceInfo := TSkImageInfo.Create(FLastWidth, FLastHeight);
@@ -1563,7 +1671,6 @@ begin
       end;
 
       FMainImage := FMainSurface.MakeImageSnapshot;
-
       FAnyDirty := True;
     end;
   finally
@@ -1571,15 +1678,9 @@ begin
   end;
   Redraw;
 
-  // Re-show dots if mouse isn't held down
   if not FMouseIsDown then
   begin
     FIsResizing := False;
-    for i := 0 to High(FVisibleSlides) do
-    begin
-      if not FVisibleSlides[i].IsRemoving then
-        FVisibleSlides[i].ControlDot.TargetAlpha := 1.0;
-    end;
     FAnyDirty := True;
   end;
 end;
@@ -1597,16 +1698,21 @@ begin
     FMouseDownSlideIdx := -1;
     FMouseIsDownOnDot := False;
 
+    // Check scroll bar interaction first
+    if (FMaxScroll > 0) and (X >= FScrollBarDot.X - 5) and (X <= FScrollBarDot.X + ScrollBarWidth + 5) and (Y >= FScrollBarDot.Y - 5) and (Y <= FScrollBarDot.Y + ScrollBarHeight + 5) then
+    begin
+      FIsDraggingScrollBar := True;
+      Exit;
+    end;
+
     FLock.Acquire;
     try
-      // Hit test: Iterate top-down (Z-Order)
+      // Hit test for slides and control dots
       for i := 0 to High(FVisibleSlides) do
       begin
         if not FVisibleSlides[i].IsRemoving and (X >= FVisibleSlides[i].CurrentX) and (X <= FVisibleSlides[i].CurrentX + FVisibleSlides[i].ActualSlideW) and (Y >= FVisibleSlides[i].CurrentY) and (Y <= FVisibleSlides[i].CurrentY + FVisibleSlides[i].ActualSlideH) then
         begin
           FMouseDownSlideIdx := i;
-
-          // Check if mouse is over the Control Dot
           LDotRect := GetDotRect(i);
           if LDotRect.Contains(TPointF.Create(X, Y)) then
             FMouseIsDownOnDot := True;
@@ -1615,7 +1721,6 @@ begin
           FDragOffsetX := X - FVisibleSlides[i].CurrentX;
           FDragOffsetY := Y - FVisibleSlides[i].CurrentY;
 
-          // Fire appropriate MouseDown event
           if FMouseIsDownOnDot then
           begin
             if Assigned(FOnDotMouseDown) then
@@ -1637,18 +1742,38 @@ end;
 
 procedure TAliveGrid.MouseMove(Shift: TShiftState; X, Y: Single);
 var
-  i: Integer;
+  i, DraggedLogical, TargetLogical: Integer;
+  DraggedY, TargetCenterY: Single;
 begin
   inherited;
   FMousePos := TPointF.Create(X, Y);
   FIsMouseOver := True;
 
-  // Handle Drag & Drop Reordering
+  // Handle scrollbar dragging
+  if FIsDraggingScrollBar and (FMaxScroll > 0) then
+  begin
+    FLock.Acquire;
+    try
+      if (FCurrentHeight - BorderGap * 2 - ScrollBarHeight) > 0 then
+      begin
+        FScrollOffset := EnsureRange(((Y - BorderGap) / (FCurrentHeight - BorderGap * 2 - ScrollBarHeight)) * FMaxScroll, 0, FMaxScroll);
+        FLastScrollTime := TThread.GetTickCount;
+        UpdateSlideMapping;
+        UpdateTargets;
+      end;
+    finally
+      FLock.Release;
+    end;
+    Redraw;
+    Exit;
+  end;
+
+  // Handle slide dragging and swapping
   if FMouseIsDown and (FDraggedSlideIdx <> -1) then
   begin
-    // Start dragging only if mouse moved beyond a threshold
     if not FIsDragging then
     begin
+      // Only start dragging if moved sufficiently to avoid accidental drags on clicks
       if Sqrt(Sqr(X - FMouseDownPos.X) + Sqr(Y - FMouseDownPos.Y)) > 20 then
       begin
         FIsDragging := True;
@@ -1666,7 +1791,6 @@ begin
       end;
     end;
 
-    // Update drag position and reorder array if crossing boundaries
     if FIsDragging and (FDraggedSlideIdx <= High(FVisibleSlides)) then
     begin
       FLock.Acquire;
@@ -1676,24 +1800,30 @@ begin
         FVisibleSlides[FDraggedSlideIdx].IsDirty := True;
         FAnyDirty := True;
 
-        // Check if dragged slide overlaps with others to swap positions
+        // Determine if dragged slide overlaps with others to swap items
         for i := 0 to High(FVisibleSlides) do
         begin
-          if (i = FDraggedSlideIdx) or FVisibleSlides[i].IsRemoving then
+          if (i = FDraggedSlideIdx) or FVisibleSlides[i].IsRemoving or (FVisibleSlides[i].LogicalItemIdx < 0) then
             Continue;
 
-          // Dragged Down
-          if (FDraggedSlideIdx < i) and (Y > FVisibleSlides[i].CurrentY + FVisibleSlides[i].ActualSlideH / 2) then
+          DraggedLogical := FVisibleSlides[FDraggedSlideIdx].LogicalItemIdx;
+          TargetLogical := FVisibleSlides[i].LogicalItemIdx;
+
+          DraggedY := FVisibleSlides[FDraggedSlideIdx].CurrentY + FVisibleSlides[FDraggedSlideIdx].ActualSlideH / 2;
+          TargetCenterY := FVisibleSlides[i].CurrentY + FVisibleSlides[i].ActualSlideH / 2;
+
+          if (DraggedY > TargetCenterY) and (DraggedLogical < TargetLogical) then
           begin
-            SwapSlides(FDraggedSlideIdx, i);
-            FDraggedSlideIdx := i;
+            SwapDataItems(DraggedLogical, TargetLogical);
+            FVisibleSlides[FDraggedSlideIdx].LogicalItemIdx := TargetLogical;
+            FVisibleSlides[i].LogicalItemIdx := DraggedLogical;
             UpdateTargets;
           end
-          // Dragged Up
-          else if (FDraggedSlideIdx > i) and (Y < FVisibleSlides[i].CurrentY + FVisibleSlides[i].ActualSlideH / 2) then
+          else if (DraggedY < TargetCenterY) and (DraggedLogical > TargetLogical) then
           begin
-            SwapSlides(i, FDraggedSlideIdx);
-            FDraggedSlideIdx := i;
+            SwapDataItems(DraggedLogical, TargetLogical);
+            FVisibleSlides[FDraggedSlideIdx].LogicalItemIdx := TargetLogical;
+            FVisibleSlides[i].LogicalItemIdx := DraggedLogical;
             UpdateTargets;
           end;
         end;
@@ -1702,7 +1832,6 @@ begin
       end;
     end;
   end;
-
   Redraw;
 end;
 
@@ -1711,7 +1840,13 @@ begin
   inherited;
   FMouseIsDown := False;
 
-  // End Dragging
+  if FIsDraggingScrollBar then
+  begin
+    FIsDraggingScrollBar := False;
+    Exit;
+  end;
+
+  // Release dragged slide
   if FDraggedSlideIdx <> -1 then
   begin
     FLock.Acquire;
@@ -1728,7 +1863,7 @@ begin
     end;
   end;
 
-  // Fire Click events if not dragging
+  // Trigger click events if no dragging occurred
   if (not FIsDragging) and (FMouseDownSlideIdx <> -1) then
   begin
     if FMouseIsDownOnDot then
@@ -1743,7 +1878,6 @@ begin
     end;
   end;
 
-  // Reset drag state
   FIsDragging := False;
   FDraggedSlideIdx := -1;
   FMouseDownSlideIdx := -1;
@@ -1757,7 +1891,7 @@ begin
   inherited;
   LLocalPos := FMousePos;
 
-  // Hit test for Double Clicks
+  // Fire double click events depending on whether dot or slide was hit
   for i := 0 to High(FVisibleSlides) do
   begin
     if not FVisibleSlides[i].IsRemoving and (LLocalPos.X >= FVisibleSlides[i].CurrentX) and (LLocalPos.X <= FVisibleSlides[i].CurrentX + FVisibleSlides[i].ActualSlideW) and (LLocalPos.Y >= FVisibleSlides[i].CurrentY) and (LLocalPos.Y <= FVisibleSlides[i].CurrentY + FVisibleSlides[i].ActualSlideH) then
@@ -1781,19 +1915,35 @@ procedure TAliveGrid.DoMouseLeave;
 begin
   inherited;
   FIsMouseOver := False;
+  FAnyDirty := True;
   Redraw;
 end;
 
-/// <summary>
-/// The final FMX paint pass. Simply draws the pre-rendered FMainImage.
-/// All heavy lifting is done in the background thread.
-/// </summary>
 procedure TAliveGrid.Draw(const ACanvas: ISkCanvas; const ADest: TRectF; const AOpacity: Single);
 begin
   if FMainImage <> nil then
     ACanvas.DrawImage(FMainImage, 0, 0, nil)
   else
     ACanvas.Clear(TAlphaColors.Black);
+end;
+
+procedure TAliveGrid.MouseWheel(Shift: TShiftState; WheelDelta: Integer; var Handled: Boolean);
+begin
+  inherited;
+  Handled := True;
+  if FMaxScroll > 0 then
+  begin
+    FLock.Acquire;
+    try
+      FScrollOffset := EnsureRange(FScrollOffset - (WheelDelta * 1.0), 0, FMaxScroll);
+      FLastScrollTime := TThread.GetTickCount;
+      UpdateSlideMapping;
+      UpdateTargets;
+    finally
+      FLock.Release;
+    end;
+    Redraw;
+  end;
 end;
 
 end.
