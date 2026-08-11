@@ -10,9 +10,9 @@ Prototype v0.2
 https://github.com/user-attachments/assets/e2952b0d-0a9c-4627-b30a-0976ce295234
       
 <img width="360" height="202" alt="aymsoy" src="https://github.com/user-attachments/assets/c389ba5c-6bc1-459a-9690-52b368bcae6a" />
-       
-https://youtu.be/_VZG5IgrEFw
-    
+        
+https://youtu.be/CmzZGL12WWs      
+      
 ✨ Key Features   
      -Real-Time Fluid Physics: The list items are not simple rectangles. They are constructed from a grid of interconnected particles using Verlet integration and constraint solving, creating a liquid, jelly-like wobble effect.     
      -Magnetic Control Dots: Each item features a magnetic indicator dot that snaps to the cursor when approached, providing tactile and intuitive feedback.      
