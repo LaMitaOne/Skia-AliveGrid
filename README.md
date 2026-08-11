@@ -1,16 +1,16 @@
 
 
-
-
 # Skia-AliveGrid
 A high-performance, custom-rendered FMX component for Delphi that provides a fluid, physics-based list interface. Built entirely on the Skia4Delphi graphics pipeline, it breaks away from traditional UI constraints to deliver a smooth, modern, and highly interactive user experience.     
 
 Prototype v0.2     
      
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/LaMitaOne/Skia-AliveGrid)     
-       
-https://github.com/user-attachments/assets/bf8168ae-59a9-4bfd-a3a2-6e775962ea7e
      
+https://github.com/user-attachments/assets/e2952b0d-0a9c-4627-b30a-0976ce295234
+      
+<img width="360" height="202" alt="aymsoy" src="https://github.com/user-attachments/assets/c389ba5c-6bc1-459a-9690-52b368bcae6a" />
+       
 https://youtu.be/_VZG5IgrEFw
     
 ✨ Key Features   
